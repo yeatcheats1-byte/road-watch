@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Road Watch</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+html,body,#map{height:100%;margin:0;background:#111}
+.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85)}
+.ui{position:fixed;z-index:1000;font:15px -apple-system,system-ui,sans-serif}
+#bar{top:calc(env(safe-area-inset-top) + 8px);left:8px;right:8px;display:flex;flex-wrap:wrap;gap:6px}
+#bar label,#bar button,#status{background:#000d;color:#fff;padding:7px 11px;border-radius:18px;border:0;font:inherit}
+#status{bottom:calc(env(safe-area-inset-bottom) + 8px);left:8px;font-size:12px}
+#alert{bottom:calc(env(safe-area-inset-bottom) + 40px);left:16px;right:16px;display:none;background:#c00;color:#fff;font-weight:bold;font-size:22px;padding:16px;border-radius:12px;text-align:center}
+</style>
+</head><body>
+<div id="map"></div>
+<div id="bar" class="ui"></div>
+<div id="alert" class="ui" role="alert"></div>
+<div id="status" class="ui">Tap anywhere to enable voice alerts</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// Data: OpenStreetMap via Overpass. Flock/ALPR cameras are mapped there by the DeFlock project.
+const TYPES = {
+  alpr:   {label:'Flock / ALPR', color:'#ff2d2d', alert:true,  test:t => t['surveillance:type'] === 'ALPR'},
+  speed:  {label:'Speed cams',   color:'#ff9500', alert:true,  test:t => t.highway === 'speed_camera'},
+  police: {label:'Police stations', color:'#3b82f6', alert:false, test:t => t.amenity === 'police'},
+};
+const ALERT_M = 300, CLEAR_M = 600;
+const SERVERS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+
+const map = L.map('map', {zoomControl:false}).setView([39.5, -98.35], 4);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {attribution:'© OpenStreetMap', maxZoom:19}).addTo(map);
+
+const layers = {}, bar = document.getElementById('bar'), statusEl = document.getElementById('status');
+for (const [k, t] of Object.entries(TYPES)) {
+  layers[k] = L.layerGroup().addTo(map);
+  const lab = document.createElement('label');
+  lab.innerHTML = `<input type="checkbox" checked> <span style="color:${t.color}">●</span> ${t.label}`;
+  lab.querySelector('input').onchange = e => e.target.checked ? layers[k].addTo(map) : layers[k].remove();
+  bar.append(lab);
+}
+const followBtn = document.createElement('button');
+followBtn.textContent = '◎ Follow';
+bar.append(followBtn);
+
+function dist(a, b) { // haversine, meters
+  const R = 6371000, r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
+  const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*r) * Math.cos(b.lat*r) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+console.assert(Math.abs(dist({lat:0,lon:0},{lat:0,lon:1}) - 111195) < 10, 'haversine self-check');
+
+const seen = new Map(); // osm id -> {type, lat, lon}
+let fetched = null, inflight = null;
+async function load() {
+  if (map.getZoom() < 11) { statusEl.textContent = 'Zoom in to load cameras'; return; }
+  if (fetched && fetched.contains(map.getBounds())) return;
+  const b = map.getBounds().pad(0.5), bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(',');
+  const q = `[out:json][timeout:25];(node["surveillance:type"="ALPR"](${bbox});node["highway"="speed_camera"](${bbox});nwr["amenity"="police"](${bbox}););out center tags;`;
+  inflight?.abort(); inflight = new AbortController();
+  statusEl.textContent = 'Loading…';
+  try {
+    let data, err;
+    for (const host of SERVERS) { // public servers are often at capacity; try the next one
+      try {
+        const res = await fetch(host, {method:'POST', body:'data=' + encodeURIComponent(q), signal:inflight.signal});
+        data = await res.json(); // errors come back as XML/HTML, even with HTTP 200
+        if (data.remark?.includes('error')) throw new Error(data.remark);
+        break;
+      } catch (e) { if (e.name === 'AbortError') throw e; err = e; data = null; }
+    }
+    if (!data) throw new Error('servers busy, pan to retry');
+    for (const el of data.elements) {
+      const id = el.type + el.id, lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon, t = el.tags || {};
+      const type = Object.keys(TYPES).find(k => TYPES[k].test(t));
+      if (seen.has(id) || !type || lat == null) continue;
+      seen.set(id, {type, lat, lon});
+      const info = [TYPES[type].label, t.brand || t.manufacturer, t.operator, t.name, t.direction && 'facing ' + t.direction].filter(Boolean).join('<br>');
+      L.circleMarker([lat, lon], {radius:7, color:'#fff', weight:1.5, fillColor:TYPES[type].color, fillOpacity:.95})
+        .bindPopup(info).addTo(layers[type]);
+    }
+    fetched = b;
+    statusEl.textContent = `${seen.size} spots loaded`;
+  } catch (e) { if (e.name !== 'AbortError') statusEl.textContent = 'Load failed: ' + e.message; }
+}
+map.on('moveend', load);
+
+// Location + proximity alerts
+let follow = true, me = null, voiceOk = false;
+const alerted = new Set(), alertEl = document.getElementById('alert');
+map.on('dragstart', () => follow = false);
+followBtn.onclick = () => { follow = true; if (me) map.setView(me.getLatLng(), Math.max(map.getZoom(), 15)); };
+document.addEventListener('click', () => { // iOS only allows speech after a user tap
+  if (voiceOk) return; voiceOk = true;
+  speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+  statusEl.textContent = 'Voice alerts on';
+}, {once:true});
+
+navigator.geolocation?.watchPosition(p => {
+  const pos = {lat:p.coords.latitude, lon:p.coords.longitude};
+  if (!me) { me = L.circleMarker([pos.lat, pos.lon], {radius:9, color:'#fff', weight:3, fillColor:'#0af', fillOpacity:1}).addTo(map); map.setView([pos.lat, pos.lon], 15); }
+  me.setLatLng([pos.lat, pos.lon]);
+  if (follow) map.panTo([pos.lat, pos.lon]);
+  let near = null;
+  for (const [id, s] of seen) {
+    if (!TYPES[s.type].alert || !map.hasLayer(layers[s.type])) continue;
+    const d = dist(pos, s);
+    if (d > CLEAR_M) alerted.delete(id);
+    else if (d < ALERT_M && !alerted.has(id) && (!near || d < near.d)) near = {id, d, s};
+  }
+  if (near) {
+    alerted.add(near.id);
+    const msg = `${TYPES[near.s.type].label} ahead, ${Math.round(near.d)} meters`;
+    alertEl.textContent = msg; alertEl.style.display = 'block';
+    setTimeout(() => alertEl.style.display = 'none', 6000);
+    if (voiceOk) speechSynthesis.speak(new SpeechSynthesisUtterance(msg));
+  }
+}, e => statusEl.textContent = 'Location: ' + e.message, {enableHighAccuracy:true});
+</script>
+</body></html>
