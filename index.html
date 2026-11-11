@@ -66,6 +66,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#001526
 
 <div id="side" class="ui">
   <button id="followBtn" aria-label="Follow my location" aria-pressed="true">➤</button>
+  <button id="copBtn" aria-label="Save a spot where I saw police">🚓</button>
   <button id="muteBtn" aria-label="Mute voice" aria-pressed="false">🔊</button>
   <button id="layersBtn" aria-label="Map layers and alert settings" aria-pressed="false">≡</button>
 </div>
@@ -84,6 +85,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#001526
     <div class="row">
       <button id="goBtn" class="primary">Start</button>
       <a id="appleBtn" target="_blank" rel="noopener">Apple Maps</a>
+      <a id="wazeBtn" target="_blank" rel="noopener">Waze</a>
       <button id="endBtn" aria-label="Close route" style="flex:0 0 50px">✕</button>
     </div>
   </div>
@@ -100,7 +102,8 @@ const TYPES = { // first match wins
   speed:    {label:'Speed cams',       color:'#ff9f0a', alert:true,  on:true,  say:'Speed camera',      test:t => t.highway === 'speed_camera'},
   avg:      {label:'Avg-speed zones',  color:'#ffd60a', alert:true,  on:true,  say:'Average speed zone', test:t => t.type === 'enforcement' && t.enforcement === 'average_speed'},
   traffic:  {label:'Traffic cams',     color:'#bf5af2', alert:false, on:false, say:'Traffic camera',    test:t => t.man_made === 'surveillance' && t.surveillance === 'traffic'},
-  police:   {label:'Police stations',  color:'#0a84ff', alert:false, on:true,  say:'Police station',    test:t => t.amenity === 'police'},
+  police:   {label:'Police stations',  color:'#0a84ff', alert:true,  on:true,  say:'Police station',    test:t => t.amenity === 'police'},
+  cop:      {label:'Cops I spotted',   color:'#00e5ff', alert:true,  on:true,  say:'Police spot', test:() => false}, // only from the 🚓 button
 };
 const SERVERS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 const $ = id => document.getElementById(id);
@@ -171,10 +174,17 @@ function addSpot(id, type, lat, lon, info) {
   const pop = document.createElement('div');
   pop.style.whiteSpace = 'pre-line';
   pop.textContent = info;
-  L.circleMarker([lat, lon], {radius:7, color:'#fff', weight:1.5, fillColor:TYPES[type].color, fillOpacity:.95}).bindPopup(pop).addTo(layers[type]);
+  const mk = L.circleMarker([lat, lon], {radius:type === 'cop' ? 9 : 7, color:'#fff', weight:1.5, fillColor:TYPES[type].color, fillOpacity:.95}).bindPopup(pop).addTo(layers[type]);
+  if (type === 'cop') {
+    const rm = document.createElement('button');
+    rm.textContent = 'Remove'; rm.style.cssText = 'margin-top:8px;min-height:40px;width:100%';
+    rm.onclick = () => { mk.remove(); seen.delete(id); saveCops(); updateCard(); };
+    pop.append(rm);
+  }
 }
-for (const s of store.get('spots', [])) addSpot(...s); // cameras saved on this phone work even when servers are down
-const saveSpots = () => store.set('spots', [...seen].slice(-40000).map(([id, s]) => [id, s.type, s.lat, s.lon, s.info]));
+const saveSpots = () => store.set('spots', [...seen].filter(([, s]) => s.type !== 'cop').slice(-40000).map(([id, s]) => [id, s.type, s.lat, s.lon, s.info]));
+const saveCops = () => store.set('cops', [...seen].filter(([, s]) => s.type === 'cop').map(([id, s]) => [id, s.type, s.lat, s.lon, s.info]));
+for (const s of [...store.get('spots', []), ...store.get('cops', [])]) addSpot(...s); // saved on this phone, so they work when servers are down
 
 function overpass(q, outer) { // ask every server at once, keep the first good answer
   const ctls = SERVERS.map(() => new AbortController()), kill = () => ctls.forEach(c => c.abort());
@@ -239,6 +249,15 @@ const setFollow = v => { follow = v; followBtn.setAttribute('aria-pressed', v); 
 map.on('dragstart', () => setFollow(false));
 followBtn.onclick = () => { setFollow(true); if (pos) map.setView([pos.lat, pos.lon], Math.max(map.getZoom(), nav ? 16 : 15)); };
 
+$('copBtn').onclick = () => {
+  if (!pos) { status('Turn on location to save a police spot'); return; }
+  const id = 'cop' + Date.now();
+  addSpot(id, 'cop', pos.lat, pos.lon, 'Police spotted ' + new Date().toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}));
+  alerted.add(id); // don't warn about the spot you're standing on
+  saveCops(); updateCard();
+  status('Police spot saved'); say('Police spot saved');
+};
+
 // ---------- search (Photon) ----------
 const qEl = $('q'), resultsEl = $('results');
 let searchCtl, searchTimer;
@@ -298,6 +317,7 @@ async function routeTo(d, quiet) {
     routeLine.setLatLngs(coords).addTo(map);
     if (!nav) { setFollow(false); map.fitBounds(routeLine.getBounds(), {paddingTopLeft:[20, 90], paddingBottomRight:[70, 230]}); }
     $('appleBtn').href = `https://maps.apple.com/?daddr=${d.lat},${d.lon}&dirflg=d`;
+    $('wazeBtn').href = `https://waze.com/ul?ll=${d.lat},${d.lon}&navigate=yes`; // Waze has live police reports, and runs on CarPlay
     $('rTitle').textContent = d.title;
     $('card').hidden = false;
     updateCard();
