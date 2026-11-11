@@ -336,9 +336,20 @@ followBtn.onclick = () => {
   setFollow(true);
   if (shown) map.easeTo(nav ? camOpts(800) : {center:[shown.lon, shown.lat], zoom:Math.max(map.getZoom(), 15), bearing:0, pitch:0, duration:800});
 };
+// Auto-zoom: close in when slow/stopped (lights, traffic) or nearing a turn, out at highway speed.
+function zoomFor(mph, turnM) {
+  let z = mph < 5 ? 17.6 : mph < 25 ? 17.6 - (mph - 5) / 20 * .6 : mph < 45 ? 17 - (mph - 25) / 20 * .8 : Math.max(15.2, 16.2 - (mph - 45) / 25);
+  if (turnM < 300) z = Math.max(z, 17.9 - turnM / 300 * 1.2); // the closer the turn, the closer the view
+  return z;
+}
+console.assert(zoomFor(0, Infinity) > zoomFor(30, Infinity) && zoomFor(30, Infinity) > zoomFor(70, Infinity) && zoomFor(70, 50) > zoomFor(70, Infinity), 'zoomFor');
+let camZoom = null, nextTurnM = Infinity;
+function autoZoom() { // eased toward the target so the view breathes instead of jumping
+  const z = zoomFor((speed ?? 0) * 2.23694, nav ? nextTurnM : Infinity);
+  return camZoom = camZoom == null ? z : camZoom + (z - camZoom) * .35;
+}
 function camOpts(duration) { // driving view: heading-up, tilted, you in the lower third
-  const fast = (speed ?? 0) > 25; // > ~55 mph: zoom out to see further ahead
-  return {center:[shown.lon, shown.lat], bearing:heading ?? map.getBearing(), pitch:60, zoom:fast ? 15.5 : 16.5,
+  return {center:[shown.lon, shown.lat], bearing:heading ?? map.getBearing(), pitch:nextTurnM < 150 ? 45 : 60, zoom:autoZoom(),
     offset:[0, map.getContainer().clientHeight * .22], duration, easing:t => t};
 }
 
@@ -396,7 +407,7 @@ function onFix(p) {
   document.getElementById('meArrow').style.opacity = heading == null ? .25 : 1;
   if (follow) {
     if (nav) map.easeTo({...camOpts(ms), center:[next.lon, next.lat]});
-    else map.easeTo({center:[next.lon, next.lat], duration:ms, easing:t => t});
+    else map.easeTo({center:[next.lon, next.lat], zoom:autoZoom(), duration:ms, easing:t => t});
   }
   checkAlerts();
   navTick();
@@ -532,7 +543,7 @@ $('goBtn').onclick = () => {
   navTick();
 };
 function endRoute() {
-  nav = false; route = null; dest = null; coords = []; steps = [];
+  nav = false; route = null; dest = null; coords = []; steps = []; nextTurnM = Infinity;
   map.getSource('route').setData({type:'FeatureCollection', features:[]});
   destMarker?.remove(); destMarker = null;
   wake?.release?.(); wake = null;
@@ -545,6 +556,7 @@ function navTick() {
   const at = s => ({lat:s.maneuver.location[1], lon:s.maneuver.location[0]});
   let st = steps[stepIdx], d = dist(pos, at(st));
   if (d < 25 && stepIdx < steps.length - 1) { stepIdx++; st = steps[stepIdx]; d = dist(pos, at(st)); }
+  nextTurnM = st.maneuver.type === 'arrive' ? Infinity : d;
   $('tDist').textContent = fmt(d).toUpperCase(); $('tText').textContent = stepText(st);
   $('tIcon').textContent = st.maneuver.type === 'arrive' ? '◎' : /roundabout|rotary/.test(st.maneuver.type) ? '⟳' : ARROWS[st.maneuver.modifier] || '⬆';
   if (st.maneuver.type === 'arrive' && d < 40) { say('You have arrived'); endRoute(); return; }
