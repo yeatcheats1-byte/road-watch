@@ -5,55 +5,86 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Road Watch">
-<meta name="theme-color" content="#0b0f14">
+<meta name="theme-color" content="#07031a">
 <title>Road Watch</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&display=swap">
 <style>
-:root{--bg:#0b0f14;--panel:#141a22e8;--line:#2a3442;--fg:#eef2f6;--dim:#8d9aab;--accent:#3ea6ff;--warn:#ff3b3b;
+/* Neon night-drive HUD: dark violet glass panels, magenta edges, cyan for "you", Orbitron for numbers */
+:root{--bg:#07031a;--panel:rgba(16,9,42,.84);--line:#ff2bd640;--fg:#f2ecff;--dim:#a49ad0;--cyan:#00f0ff;--pink:#ff2bd6;--lime:#39ff14;
+  --hud:'Orbitron',ui-monospace,Menlo,monospace;--glow:0 0 22px #ff2bd626,0 10px 30px #000b;
   --t:env(safe-area-inset-top,0px);--b:env(safe-area-inset-bottom,0px);--l:env(safe-area-inset-left,0px);--r:env(safe-area-inset-right,0px);color-scheme:dark}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:16px -apple-system,system-ui,sans-serif;-webkit-tap-highlight-color:transparent;overflow:hidden}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:16px -apple-system,system-ui,sans-serif;-webkit-tap-highlight-color:transparent;overflow:hidden;overscroll-behavior:none}
 #map{position:fixed;inset:0;background:var(--bg)}
-.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.8) contrast(.9)}
-.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#141a22;color:var(--fg)}
-.panel{background:var(--panel);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 28px #0009}
+.panel{background:var(--panel);-webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);border:1px solid var(--line);border-radius:18px;box-shadow:var(--glow)}
 button,select,input{font:inherit;color:var(--fg)}
-button{background:var(--panel);border:1px solid var(--line);border-radius:14px;min-height:50px;min-width:50px;padding:0 14px;cursor:pointer;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
-button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-button.primary{background:var(--accent);border-color:var(--accent);color:#001526;font-weight:700}
-.ui{position:fixed;z-index:1000}
-#top{z-index:1002;top:calc(var(--t) + 10px);left:calc(var(--l) + 10px);right:calc(var(--r) + 10px);display:flex;flex-direction:column;gap:8px}
-#q{width:100%;height:52px;padding:0 18px;font-size:17px;border-radius:16px;border:1px solid var(--line);background:var(--panel);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+button{background:var(--panel);border:1px solid var(--line);border-radius:16px;min-height:52px;min-width:52px;padding:0 14px;cursor:pointer;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:var(--glow)}
+button:active{transform:scale(.96)}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+button.primary{background:linear-gradient(135deg,#00f0ff,#7a5cff);border:0;color:#05011a;font-weight:800;box-shadow:0 0 24px #00f0ff66}
+.ui{position:fixed;z-index:10}
+#top{z-index:12;top:calc(var(--t) + 10px);left:calc(var(--l) + 10px);right:calc(var(--r) + 10px);display:flex;flex-direction:column;gap:8px}
+#q{width:100%;height:54px;padding:0 18px;font-size:17px;border-radius:18px;border:1px solid var(--line);background:var(--panel);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:var(--glow);outline:none;transition:border-color .2s,box-shadow .2s}
+#q:focus{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan),0 0 26px #00f0ff55}
 #q::placeholder{color:var(--dim)}
 #results{max-height:50vh;overflow:auto;padding:4px}
-.res{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;text-align:left;border:0;background:none;border-radius:12px;padding:12px;min-height:0;backdrop-filter:none;-webkit-backdrop-filter:none}
-.res:active,.res:hover{background:#ffffff12}
+.res{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;text-align:left;border:0;background:none;box-shadow:none;border-radius:14px;padding:12px;min-height:0;backdrop-filter:none;-webkit-backdrop-filter:none}
+.res:active,.res:hover{background:#ff2bd618;transform:none}
 .res span{min-width:0}.res b{display:block;font-weight:600}.res small{color:var(--dim)}
-.res .d{color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap}
-#turn{display:flex;align-items:center;gap:14px;padding:14px 16px;font-size:20px;font-weight:650;line-height:1.25}
-#turn .d{color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:24px}
-#side{right:calc(var(--r) + 10px);top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px}
-#side button{font-size:20px;padding:0}
-#side button[aria-pressed="true"]{color:var(--accent);border-color:var(--accent)}
-#layers{right:calc(var(--r) + 70px);top:50%;transform:translateY(-50%);padding:14px;display:flex;flex-direction:column;gap:12px;max-width:calc(100vw - 90px)}
+.res .d{font:600 14px var(--hud);color:var(--cyan);white-space:nowrap;text-shadow:0 0 10px #00f0ff88}
+#turn{display:flex;align-items:center;gap:14px;padding:12px 16px;border-color:#00f0ff66;box-shadow:0 0 26px #00f0ff33,0 10px 30px #000b}
+#tIcon{font-size:38px;line-height:1;color:var(--cyan);text-shadow:0 0 14px var(--cyan);width:44px;text-align:center}
+#turn .txt{display:flex;flex-direction:column;gap:2px;min-width:0}
+#tDist{font:800 26px/1 var(--hud);color:var(--cyan);text-shadow:0 0 12px #00f0ff99}
+#tText{font-size:18px;font-weight:650;line-height:1.25}
+#side{right:calc(var(--r) + 10px);top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:9px}
+#side button{font-size:21px;padding:0}
+#side button[aria-pressed="true"]{color:var(--cyan);border-color:var(--cyan);box-shadow:0 0 18px #00f0ff55}
+#layers{z-index:11;right:calc(var(--r) + 72px);top:50%;transform:translateY(-50%);padding:16px;display:flex;flex-direction:column;gap:12px;max-width:calc(100vw - 92px)}
 #layers label{display:flex;align-items:center;gap:10px;white-space:nowrap}
-#layers input[type=checkbox]{width:22px;height:22px;accent-color:var(--accent)}
-#layers select{background:#0b0f14;border:1px solid var(--line);border-radius:10px;padding:8px}
+#layers input[type=checkbox]{width:22px;height:22px;accent-color:var(--pink)}
+#layers select{background:#0b0524;border:1px solid var(--line);border-radius:10px;padding:8px}
 .dot{width:12px;height:12px;border-radius:50%;border:1.5px solid #fff;flex:none}
-#bottom{left:calc(var(--l) + 10px);right:calc(var(--r) + 10px);bottom:calc(var(--b) + 10px);display:flex;flex-direction:column;gap:8px}
-#alert{background:var(--warn);color:#fff;font-size:22px;font-weight:750;padding:18px;border-radius:16px;text-align:center;box-shadow:0 8px 28px #000a}
-#card{padding:14px;display:flex;flex-direction:column;gap:12px}
+#bottom{left:calc(var(--l) + 10px);right:calc(var(--r) + 10px);bottom:calc(var(--b) + 10px);display:flex;flex-direction:column;gap:8px;pointer-events:none}
+#bottom>*{pointer-events:auto}
+#alert{color:#fff;font-size:22px;font-weight:800;padding:18px;border-radius:18px;text-align:center;letter-spacing:.01em;animation:flash 1s ease-in-out 3}
+@keyframes flash{50%{filter:brightness(1.35)}}
+#card{padding:16px;display:flex;flex-direction:column;gap:12px}
 #card .row{display:flex;gap:8px}
 #card .row>*{flex:1}
-#card a{display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--fg);border:1px solid var(--line);border-radius:14px;min-height:50px}
-#rTitle{font-weight:650;font-size:18px}
-#rMeta{color:var(--dim);font-variant-numeric:tabular-nums}
+#card a{display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--fg);border:1px solid var(--line);border-radius:16px;min-height:52px;background:#ffffff08}
+#rTitle{font-weight:700;font-size:18px}
+#rMeta{font:600 14px var(--hud);color:var(--cyan);margin-top:4px}
 #rCams{display:flex;flex-wrap:wrap;gap:6px}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:#ffffff10;font-size:14px}
-#status{align-self:flex-start;font-size:12px;color:var(--dim);padding:5px 10px;border-radius:10px;background:var(--panel)}
-.me{width:30px;height:30px;transition:transform .3s}
-@media (prefers-reduced-motion:reduce){.me{transition:none}}
+#card.driving{padding:10px 12px;gap:8px}
+#card.driving #rCams,#card.driving #rTitle{display:none}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;background:#ffffff0d;border:1px solid #ffffff14;font-size:14px}
+#hudRow{display:flex;align-items:flex-end;justify-content:space-between;gap:8px}
+#status{font-size:12px;color:var(--dim);padding:6px 11px;border-radius:11px;background:var(--panel);max-width:60%}
+/* speedometer */
+#speedo{position:relative;width:108px;height:108px;border-radius:50%;display:grid;place-items:center;flex:none}
+#speedo svg{position:absolute;inset:4px;transform:rotate(135deg)}
+#speedo circle{fill:none;stroke-width:7;stroke-linecap:round}
+#speedo .trk{stroke:#ffffff14;stroke-dasharray:197.9 263.9}
+#arc{stroke:var(--lime);color:var(--lime);stroke-dasharray:0 263.9;transition:stroke-dasharray .9s linear,stroke .5s,color .5s;filter:drop-shadow(0 0 5px currentColor)}
+#speedo .num{display:flex;flex-direction:column;align-items:center;line-height:1}
+#mph{font:800 34px/1 var(--hud);font-variant-numeric:tabular-nums;text-shadow:0 0 14px #ffffff55}
+#speedo span{font:600 9px var(--hud);letter-spacing:.25em;color:var(--dim);margin-top:4px}
+#acc{font:600 9px var(--hud);margin-top:5px;color:var(--dim)}
+/* you-are-here arrow */
+.me{width:46px;height:46px;position:relative}
+.me::before{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,#00f0ff66 0,#00f0ff00 70%);animation:pulse 2s ease-out infinite}
+.me svg{position:absolute;inset:7px;filter:drop-shadow(0 0 6px #00f0ff)}
+@keyframes pulse{0%{transform:scale(.6);opacity:1}100%{transform:scale(1.6);opacity:0}}
+@media (prefers-reduced-motion:reduce){.me::before,#alert{animation:none}#arc{transition:none}}
+.maplibregl-popup-content{background:#140a35;color:var(--fg);border:1px solid var(--line);border-radius:14px;box-shadow:var(--glow);padding:12px 14px;white-space:pre-line}
+.maplibregl-popup-tip{border-top-color:#140a35!important;border-bottom-color:#140a35!important}
+.maplibregl-ctrl-attrib{background:#07031acc!important;color:var(--dim)}
+.maplibregl-ctrl-top-right{top:calc(var(--t) + 70px)}
+.maplibregl-ctrl-attrib a{color:var(--dim)}
 </style>
 </head><body>
 <div id="map"></div>
@@ -61,7 +92,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#001526
 <div id="top" class="ui">
   <input id="q" type="search" placeholder="Search places, e.g. mc don" autocomplete="off" enterkeyhint="search" aria-label="Search places">
   <div id="results" class="panel" hidden></div>
-  <div id="turn" class="panel" hidden><span class="d" id="tDist"></span><span id="tText"></span></div>
+  <div id="turn" class="panel" hidden><span id="tIcon" aria-hidden="true">⬆</span><span class="txt"><span id="tDist"></span><span id="tText"></span></span></div>
 </div>
 
 <div id="side" class="ui">
@@ -79,6 +110,13 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#001526
 
 <div id="bottom" class="ui">
   <div id="alert" role="alert" hidden></div>
+  <div id="hudRow">
+    <div id="speedo" class="panel" role="img" aria-label="Speed">
+      <svg viewBox="0 0 92 92"><circle class="trk" cx="46" cy="46" r="42"/><circle id="arc" cx="46" cy="46" r="42"/></svg>
+      <div class="num"><b id="mph">--</b><span>MPH</span><small id="acc">NO GPS</small></div>
+    </div>
+    <div id="status">Tap anywhere to turn on voice</div>
+  </div>
   <div id="card" class="panel" hidden>
     <div><div id="rTitle"></div><div id="rMeta"></div></div>
     <div id="rCams"></div>
@@ -86,24 +124,24 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#001526
       <button id="goBtn" class="primary">Start</button>
       <a id="appleBtn" target="_blank" rel="noopener">Apple Maps</a>
       <a id="wazeBtn" target="_blank" rel="noopener">Waze</a>
-      <button id="endBtn" aria-label="Close route" style="flex:0 0 50px">✕</button>
+      <button id="endBtn" aria-label="Close route" style="flex:0 0 52px">✕</button>
     </div>
   </div>
-  <div id="status">Tap anywhere to turn on voice</div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script>
-// Data: OpenStreetMap (Overpass) for cameras, Photon for search, OSRM for driving routes.
+// Map: OpenFreeMap vector tiles (free, no key), recolored neon below. Cameras: OpenStreetMap via Overpass.
+// Search: Photon. Routes: OSRM.
 // shortcut: Photon/OSRM/Overpass public demo servers, fine for one person; self-host or pay if they rate-limit you.
 const TYPES = { // first match wins
-  alpr:     {label:'Flock / ALPR',     color:'#ff3b3b', alert:true,  on:true,  say:'Flock camera',      test:t => t['surveillance:type'] === 'ALPR'},
-  redlight: {label:'Red-light cams',   color:'#ff2d95', alert:true,  on:true,  say:'Red light camera',  test:t => t.type === 'enforcement' && t.enforcement === 'traffic_signals'},
-  speed:    {label:'Speed cams',       color:'#ff9f0a', alert:true,  on:true,  say:'Speed camera',      test:t => t.highway === 'speed_camera'},
-  avg:      {label:'Avg-speed zones',  color:'#ffd60a', alert:true,  on:true,  say:'Average speed zone', test:t => t.type === 'enforcement' && t.enforcement === 'average_speed'},
-  traffic:  {label:'Traffic cams',     color:'#bf5af2', alert:false, on:false, say:'Traffic camera',    test:t => t.man_made === 'surveillance' && t.surveillance === 'traffic'},
-  police:   {label:'Police stations',  color:'#0a84ff', alert:true,  on:true,  say:'Police station',    test:t => t.amenity === 'police'},
-  cop:      {label:'Cops I spotted',   color:'#00e5ff', alert:true,  on:true,  say:'Police spot', test:() => false}, // only from the 🚓 button
+  alpr:     {label:'Flock / ALPR',    color:'#ff2b4e', alert:true,  on:true,  say:'Flock camera',       test:t => t['surveillance:type'] === 'ALPR'},
+  redlight: {label:'Red-light cams',  color:'#ff2bd6', alert:true,  on:true,  say:'Red light camera',   test:t => t.type === 'enforcement' && t.enforcement === 'traffic_signals'},
+  speed:    {label:'Speed cams',      color:'#ffb000', alert:true,  on:true,  say:'Speed camera',       test:t => t.highway === 'speed_camera'},
+  avg:      {label:'Avg-speed zones', color:'#f5ff3b', alert:true,  on:true,  say:'Average speed zone', test:t => t.type === 'enforcement' && t.enforcement === 'average_speed'},
+  traffic:  {label:'Traffic cams',    color:'#b44bff', alert:false, on:false, say:'Traffic camera',     test:t => t.man_made === 'surveillance' && t.surveillance === 'traffic'},
+  police:   {label:'Police stations', color:'#2b8cff', alert:true,  on:true,  say:'Police station',     test:t => t.amenity === 'police'},
+  cop:      {label:'Cops I spotted',  color:'#00ff9c', alert:true,  on:true,  say:'Police spot',        test:() => false}, // only from the 🚓 button
 };
 const SERVERS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 const $ = id => document.getElementById(id);
@@ -111,6 +149,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('rw.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('rw.' + k, JSON.stringify(v)); } catch {} },
 };
+const statusEl = $('status'), status = s => statusEl.textContent = s;
 
 // ---------- geometry ----------
 const R = 6371000, rad = Math.PI / 180;
@@ -124,65 +163,94 @@ function bearing(a, b) {
   const x = Math.cos(a.lat*rad) * Math.sin(b.lat*rad) - Math.sin(a.lat*rad) * Math.cos(b.lat*rad) * Math.cos((b.lon - a.lon) * rad);
   return (Math.atan2(y, x) / rad + 360) % 360;
 }
-function distToLine(p, line) { // meters from p to polyline [[lat,lon],...], flat-earth approximation near p
+const angleDiff = (a, b) => ((b - a + 540) % 360) - 180;
+function distToLine(p, line) { // meters from p to polyline [[lon,lat],...], flat-earth approximation near p
   const kx = Math.cos(p.lat * rad) * 111320, ky = 110540;
   let best = Infinity;
   for (let i = 1; i < line.length; i++) {
-    const ax = (line[i-1][1] - p.lon) * kx, ay = (line[i-1][0] - p.lat) * ky;
-    const bx = (line[i][1] - p.lon) * kx, by = (line[i][0] - p.lat) * ky;
+    const ax = (line[i-1][0] - p.lon) * kx, ay = (line[i-1][1] - p.lat) * ky;
+    const bx = (line[i][0] - p.lon) * kx, by = (line[i][1] - p.lat) * ky;
     const dx = bx - ax, dy = by - ay, L = dx*dx + dy*dy;
     const t = L ? Math.max(0, Math.min(1, -(ax*dx + ay*dy) / L)) : 0;
     best = Math.min(best, Math.hypot(ax + t*dx, ay + t*dy));
   }
   return best;
 }
+function circle(c, r) { // GeoJSON polygon of radius r meters, for the GPS accuracy ring
+  const pts = [];
+  for (let i = 0; i <= 48; i++) { const a = i / 48 * 2 * Math.PI; pts.push([c.lon + r * Math.sin(a) / (111320 * Math.cos(c.lat * rad)), c.lat + r * Math.cos(a) / 110540]); }
+  return {type:'Feature', properties:{}, geometry:{type:'Polygon', coordinates:[pts]}};
+}
 const fmt = m => m < 300 ? Math.max(50, Math.round(m * 3.281 / 50) * 50) + ' ft' : (m / 1609.34).toFixed(m < 16000 ? 1 : 0) + ' mi';
+const spoken = m => fmt(m).replace('ft', 'feet').replace('mi', 'miles');
 console.assert(Math.abs(dist({lat:0,lon:0}, {lat:0,lon:1}) - 111195) < 10, 'dist');
 console.assert(Math.round(bearing({lat:0,lon:0}, {lat:1,lon:0})) === 0 && Math.round(bearing({lat:0,lon:0}, {lat:0,lon:1})) === 90, 'bearing');
-console.assert(Math.abs(distToLine({lat:0.001,lon:0.5}, [[0,0],[0,1]]) - 110.5) < 1, 'distToLine');
+console.assert(Math.abs(distToLine({lat:0.001,lon:0.5}, [[0,0],[1,0]]) - 110.5) < 1, 'distToLine');
+console.assert(angleDiff(350, 10) === 20 && angleDiff(10, 350) === -20, 'angleDiff');
 
-// ---------- map + layers ----------
-const map = L.map('map', {zoomControl:false, attributionControl:false, preferCanvas:true}).setView(store.get('view', [39.5, -98.35, 4]).slice(0,2), store.get('view', [0,0,4])[2]);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19}).addTo(map);
-L.control.attribution({position:'bottomright', prefix:false}).addAttribution('© OpenStreetMap').addTo(map);
-map.on('moveend', () => store.set('view', [map.getCenter().lat, map.getCenter().lng, map.getZoom()]));
-
-const statusEl = $('status'), status = s => statusEl.textContent = s;
-const layers = {}, enabled = store.get('layers', Object.fromEntries(Object.entries(TYPES).map(([k, t]) => [k, t.on])));
-for (const [k, t] of Object.entries(TYPES)) {
-  layers[k] = L.layerGroup();
-  if (enabled[k] ?? t.on) layers[k].addTo(map);
-  const lab = document.createElement('label');
-  lab.innerHTML = `<input type="checkbox" id="lay-${k}"><span class="dot" style="background:${t.color}"></span>`;
-  lab.append(t.label);
-  const cb = lab.querySelector('input');
-  cb.checked = map.hasLayer(layers[k]);
-  cb.onchange = () => { cb.checked ? layers[k].addTo(map) : layers[k].remove(); enabled[k] = cb.checked; store.set('layers', enabled); updateCard(); };
-  $('layerList').append(lab);
+// ---------- neon map style ----------
+const ROAD = id => /motorway/.test(id) ? '#ff2bd6' : /trunk_primary/.test(id) ? '#00e5ff' : /secondary_tertiary/.test(id) ? '#9b5cff'
+  : /path|pedestrian|service|track/.test(id) ? '#2e2660' : '#4b3ba3';
+function neonify(style) {
+  delete style.sources.ne2_shaded;
+  style.layers = style.layers.filter(l => l.source !== 'ne2_shaded' && !/hatching|pattern|one_way/.test(l.id));
+  for (const l of style.layers) {
+    const p = l.paint = l.paint || {}, id = l.id;
+    if (l.type === 'background') p['background-color'] = '#07031a';
+    else if (l.type === 'fill') {
+      delete p['fill-pattern'];
+      p['fill-color'] = id === 'water' ? '#0a0d48' : /park|wood|grass|wetland|pitch|cemetery/.test(id) ? '#0a1c2e'
+        : id === 'building' ? '#170c3d' : /ice/.test(id) ? '#121040' : '#0c0629';
+      if (id === 'building') p['fill-outline-color'] = '#ff2bd655';
+      p['fill-opacity'] = id === 'water' || id === 'building' ? 1 : .8;
+    } else if (l.type === 'fill-extrusion') {
+      p['fill-extrusion-color'] = ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 0], 0, '#1a0f4a', 60, '#2c1670', 200, '#4a1f9a'];
+      p['fill-extrusion-opacity'] = .88;
+    } else if (l.type === 'line') {
+      delete p['line-pattern'];
+      if (/waterway/.test(id)) p['line-color'] = '#2440c0';
+      else if (/boundary/.test(id)) p['line-color'] = '#7a34b8';
+      else if (/rail/.test(id)) p['line-color'] = '#3b2d6b';
+      else if (/aeroway/.test(id)) p['line-color'] = '#2e2660';
+      else if (/park/.test(id)) p['line-color'] = '#12344a';
+      else if (/casing/.test(id)) { p['line-color'] = ROAD(id); p['line-opacity'] = /motorway|trunk|secondary/.test(id) ? .5 : .18; p['line-blur'] = 5; } // casing becomes the neon glow
+      else { p['line-color'] = ROAD(id); p['line-opacity'] = 1; }
+    } else if (l.type === 'symbol') {
+      p['text-color'] = /^label_(city|town|state|country)/.test(id) ? '#ffffff' : /highway-name/.test(id) ? '#b9f6ff' : /water/.test(id) ? '#7d93ff' : '#ddd3ff';
+      p['text-halo-color'] = '#07031a'; p['text-halo-width'] = 1.6;
+    }
+  }
+  return style;
 }
-$('layersBtn').onclick = () => { const open = $('layers').hidden; $('layers').hidden = !open; $('layersBtn').setAttribute('aria-pressed', open); };
-const warnSel = $('warnDist');
-warnSel.value = store.get('warn', '400');
-warnSel.onchange = () => store.set('warn', warnSel.value);
 
-// ---------- camera data ----------
-const seen = new Map(); // osm id -> {type, lat, lon, info}
+// ---------- state ----------
+const enabled = (s => Object.fromEntries(Object.keys(TYPES).map(k => [k, s[k] ?? TYPES[k].on])))(store.get('layers', {}));
+const seen = new Map(); // id -> {type, lat, lon, info}
+let map, mapReady = false, pos = null, shown = null, heading = null, speed = null, follow = true, me = null;
+let route = null, coords = [], steps = [], stepIdx = 1, announced = -1, nav = false, offCount = 0, wake = null, dest = null, destMarker = null;
+
+// ---------- camera spots ----------
+let spotsQueued = false;
+function refreshSpots() { // batch into one GPU upload per frame
+  if (spotsQueued || !mapReady) return;
+  spotsQueued = true;
+  requestAnimationFrame(() => {
+    spotsQueued = false;
+    map.getSource('spots').setData({type:'FeatureCollection', features:[...seen].map(([id, s]) => ({type:'Feature', properties:{id, t:s.type}, geometry:{type:'Point', coordinates:[s.lon, s.lat]}}))});
+  });
+}
+function applyFilter() {
+  if (!mapReady) return;
+  const f = ['in', ['get', 't'], ['literal', Object.keys(TYPES).filter(k => enabled[k])]];
+  map.setFilter('spots-glow', f); map.setFilter('spots', f);
+}
 function addSpot(id, type, lat, lon, info) {
   if (seen.has(id) || !TYPES[type]) return;
   seen.set(id, {type, lat, lon, info});
-  // OSM tags are user-submitted: popup text goes in via textContent, never innerHTML
-  const pop = document.createElement('div');
-  pop.style.whiteSpace = 'pre-line';
-  pop.textContent = info;
-  const mk = L.circleMarker([lat, lon], {radius:type === 'cop' ? 9 : 7, color:'#fff', weight:1.5, fillColor:TYPES[type].color, fillOpacity:.95}).bindPopup(pop).addTo(layers[type]);
-  if (type === 'cop') {
-    const rm = document.createElement('button');
-    rm.textContent = 'Remove'; rm.style.cssText = 'margin-top:8px;min-height:40px;width:100%';
-    rm.onclick = () => { mk.remove(); seen.delete(id); saveCops(); updateCard(); };
-    pop.append(rm);
-  }
+  refreshSpots();
 }
-const saveSpots = () => store.set('spots', [...seen].filter(([, s]) => s.type !== 'cop').slice(-40000).map(([id, s]) => [id, s.type, s.lat, s.lon, s.info]));
+let saveTimer;
+const saveSpots = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => store.set('spots', [...seen].filter(([, s]) => s.type !== 'cop').slice(-40000).map(([id, s]) => [id, s.type, s.lat, s.lon, s.info])), 1500); };
 const saveCops = () => store.set('cops', [...seen].filter(([, s]) => s.type === 'cop').map(([id, s]) => [id, s.type, s.lat, s.lon, s.info]));
 for (const s of [...store.get('spots', []), ...store.get('cops', [])]) addSpot(...s); // saved on this phone, so they work when servers are down
 
@@ -195,15 +263,22 @@ function overpass(q, outer) { // ask every server at once, keep the first good a
       .then(d => { if (d.remark?.includes('error')) throw new Error(d.remark); return d; })))
     .finally(() => { clearTimeout(timer); kill(); outer.removeEventListener('abort', kill); });
 }
-
+const pad = (b, f) => { const dy = (b.n - b.s) * f, dx = (b.e - b.w) * f; return {s:b.s - dy, n:b.n + dy, w:b.w - dx, e:b.e + dx}; };
+const contains = (a, b) => a.s <= b.s && a.n >= b.n && a.w <= b.w && a.e >= b.e;
+function viewBounds() {
+  const b = map.getBounds(), c = map.getCenter();
+  let v = {s:b.getSouth(), n:b.getNorth(), w:b.getWest(), e:b.getEast()};
+  if (v.n - v.s > .4 || v.e - v.w > .4) v = {s:c.lat - .12, n:c.lat + .12, w:c.lng - .15, e:c.lng + .15}; // tilted view sees to the horizon; cap it
+  return v;
+}
 let fetched = null, inflight = null, retryTimer = null;
 async function load(bounds) {
   if (!bounds) {
-    if (map.getZoom() < 11) { status('Zoom in to load cameras'); return; }
-    if (fetched && fetched.contains(map.getBounds())) return;
-    bounds = map.getBounds().pad(0.5);
+    if (map.getZoom() < 10) { status('Zoom in to load cameras'); return; }
+    if (fetched && contains(fetched, viewBounds())) return;
+    bounds = pad(viewBounds(), .5);
   }
-  const bb = [bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()].join(',');
+  const bb = [bounds.s, bounds.w, bounds.n, bounds.e].map(x => x.toFixed(5)).join(',');
   const q = `[out:json][timeout:25];(node["surveillance:type"="ALPR"](${bb});node["highway"="speed_camera"](${bb});rel["type"="enforcement"](${bb});node["man_made"="surveillance"]["surveillance"="traffic"](${bb});nwr["amenity"="police"](${bb}););out center tags;`;
   inflight?.abort(); clearTimeout(retryTimer);
   const ctl = inflight = new AbortController();
@@ -226,7 +301,21 @@ async function load(bounds) {
     retryTimer = setTimeout(() => load(bounds), 30000);
   }
 }
-map.on('moveend', () => load());
+
+// ---------- layer toggles ----------
+for (const [k, t] of Object.entries(TYPES)) {
+  const lab = document.createElement('label');
+  lab.innerHTML = `<input type="checkbox" id="lay-${k}"><span class="dot" style="background:${t.color};box-shadow:0 0 8px ${t.color}"></span>`;
+  lab.append(t.label);
+  const cb = lab.querySelector('input');
+  cb.checked = enabled[k];
+  cb.onchange = () => { enabled[k] = cb.checked; store.set('layers', enabled); applyFilter(); updateCard(); };
+  $('layerList').append(lab);
+}
+$('layersBtn').onclick = () => { const open = $('layers').hidden; $('layers').hidden = !open; $('layersBtn').setAttribute('aria-pressed', open); };
+const warnSel = $('warnDist');
+warnSel.value = store.get('warn', '400');
+warnSel.onchange = () => store.set('warn', warnSel.value);
 
 // ---------- voice ----------
 let voiceOk = false, muted = store.get('muted', false);
@@ -240,15 +329,80 @@ document.addEventListener('pointerdown', () => { // iOS only allows speech after
 }, {once:true});
 const say = msg => { if (voiceOk && !muted) speechSynthesis.speak(new SpeechSynthesisUtterance(msg)); };
 
-// ---------- my location ----------
-const meIcon = L.divIcon({className:'', iconSize:[30,30], html:
-  '<svg class="me" id="meSvg" viewBox="0 0 30 30"><circle cx="15" cy="15" r="12" fill="#3ea6ff" stroke="#fff" stroke-width="3"/><path id="meArrow" d="M15 6l5.5 12-5.5-3.2L9.5 18z" fill="#fff"/></svg>'});
-let me = null, pos = null, last = null, heading = null, follow = true;
+// ---------- follow / camera ----------
 const followBtn = $('followBtn');
 const setFollow = v => { follow = v; followBtn.setAttribute('aria-pressed', v); };
-map.on('dragstart', () => setFollow(false));
-followBtn.onclick = () => { setFollow(true); if (pos) map.setView([pos.lat, pos.lon], Math.max(map.getZoom(), nav ? 16 : 15)); };
+followBtn.onclick = () => {
+  setFollow(true);
+  if (shown) map.easeTo(nav ? camOpts(800) : {center:[shown.lon, shown.lat], zoom:Math.max(map.getZoom(), 15), bearing:0, pitch:0, duration:800});
+};
+function camOpts(duration) { // driving view: heading-up, tilted, you in the lower third
+  const fast = (speed ?? 0) > 25; // > ~55 mph: zoom out to see further ahead
+  return {center:[shown.lon, shown.lat], bearing:heading ?? map.getBearing(), pitch:60, zoom:fast ? 15.5 : 16.5,
+    offset:[0, map.getContainer().clientHeight * .22], duration, easing:t => t};
+}
 
+// ---------- speedometer ----------
+const arc = $('arc'), mphEl = $('mph'), accEl = $('acc');
+function showSpeed(ms, acc) {
+  const mph = ms == null ? null : ms * 2.23694;
+  mphEl.textContent = mph == null ? '--' : Math.round(mph < 1 ? 0 : mph);
+  const col = mph == null || mph < 30 ? '#39ff14' : mph < 55 ? '#00f0ff' : mph < 75 ? '#ffb000' : '#ff2bd6';
+  arc.style.stroke = arc.style.color = col;
+  arc.style.strokeDasharray = `${Math.min(mph ?? 0, 100) / 100 * 197.9} 263.9`;
+  const ft = Math.round(acc * 3.281);
+  accEl.textContent = `GPS ±${ft} FT`;
+  accEl.style.color = acc < 10 ? '#39ff14' : acc < 30 ? '#ffb000' : '#ff2b4e';
+}
+
+// ---------- my location ----------
+let lastFix = null, anim = 0;
+function glide(from, to, ms) { // move the arrow smoothly between GPS fixes
+  cancelAnimationFrame(anim);
+  const t0 = performance.now();
+  const step = now => {
+    const k = Math.min(1, (now - t0) / ms);
+    shown = {lat:from.lat + (to.lat - from.lat) * k, lon:from.lon + (to.lon - from.lon) * k};
+    me.setLngLat([shown.lon, shown.lat]);
+    if (k < 1) anim = requestAnimationFrame(step);
+  };
+  anim = requestAnimationFrame(step);
+}
+function onFix(p) {
+  const now = p.timestamp || Date.now(), c = p.coords, next = {lat:c.latitude, lon:c.longitude};
+  // speed: GPS value when valid, else from the last fix
+  if (c.speed != null && c.speed >= 0) speed = c.speed;
+  else if (lastFix && now > lastFix.t) speed = dist(lastFix.p, next) / ((now - lastFix.t) / 1000);
+  // heading: GPS course while moving, else direction of the last 8+ m of travel; smoothed so the arrow doesn't jitter
+  let raw = null;
+  if (c.heading != null && !isNaN(c.heading) && (speed ?? 0) > 1.5) raw = c.heading;
+  else if (pos && dist(pos, next) > 8) raw = bearing(pos, next);
+  if (raw != null) heading = heading == null ? raw : (heading + angleDiff(heading, raw) * .6 + 360) % 360;
+  const ms = lastFix ? Math.min(1200, Math.max(200, now - lastFix.t)) : 0;
+  lastFix = {p:next, t:now};
+  if (!pos || dist(pos, next) > 8 || raw == null) pos = next;
+  showSpeed(speed, c.accuracy);
+  if (!mapReady) return;
+  map.getSource('acc').setData(circle(next, c.accuracy));
+  if (!me) {
+    const el = document.createElement('div');
+    el.className = 'me';
+    el.innerHTML = '<svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="#07031a" stroke="#00f0ff" stroke-width="3"/><path id="meArrow" d="M16 6l7 15-7-4-7 4z" fill="#00f0ff"/></svg>';
+    me = new maplibregl.Marker({element:el, rotationAlignment:'map', pitchAlignment:'map'}).setLngLat([next.lon, next.lat]).addTo(map);
+    shown = next;
+    map.jumpTo({center:[next.lon, next.lat], zoom:Math.max(map.getZoom(), 15)});
+  } else glide(shown, next, ms);
+  me.setRotation(heading ?? 0);
+  document.getElementById('meArrow').style.opacity = heading == null ? .25 : 1;
+  if (follow) {
+    if (nav) map.easeTo({...camOpts(ms), center:[next.lon, next.lat]});
+    else map.easeTo({center:[next.lon, next.lat], duration:ms, easing:t => t});
+  }
+  checkAlerts();
+  navTick();
+}
+
+// ---------- police spots ----------
 $('copBtn').onclick = () => {
   if (!pos) { status('Turn on location to save a police spot'); return; }
   const id = 'cop' + Date.now();
@@ -257,6 +411,20 @@ $('copBtn').onclick = () => {
   saveCops(); updateCard();
   status('Police spot saved'); say('Police spot saved');
 };
+function showPopup(id) {
+  const s = seen.get(id);
+  if (!s) return;
+  // OSM tags are user-submitted: text goes in via textContent, never innerHTML
+  const el = document.createElement('div');
+  el.textContent = s.info;
+  const popup = new maplibregl.Popup({closeButton:false, offset:12}).setLngLat([s.lon, s.lat]).setDOMContent(el).addTo(map);
+  if (s.type === 'cop') {
+    const rm = document.createElement('button');
+    rm.textContent = 'Remove'; rm.style.cssText = 'display:block;margin-top:10px;min-height:42px;width:100%';
+    rm.onclick = () => { seen.delete(id); saveCops(); refreshSpots(); updateCard(); popup.remove(); };
+    el.append(rm);
+  }
+}
 
 // ---------- search (Photon) ----------
 const qEl = $('q'), resultsEl = $('results');
@@ -300,46 +468,50 @@ async function search() {
 }
 
 // ---------- routing (OSRM) ----------
-const routeLine = L.polyline([], {color:'#3ea6ff', weight:7, opacity:.9});
-let dest = null, destMarker = null, route = null, coords = [], steps = [], stepIdx = 1, announced = -1, nav = false, offCount = 0, wake = null;
 async function routeTo(d, quiet) {
   dest = d;
   destMarker?.remove();
-  destMarker = L.marker([d.lat, d.lon]).addTo(map);
-  if (!pos) { status('Turn on location to get directions'); map.setView([d.lat, d.lon], 15); return; }
+  destMarker = new maplibregl.Marker({color:'#ff2bd6'}).setLngLat([d.lon, d.lat]).addTo(map);
+  if (!pos) { status('Turn on location to get directions'); map.easeTo({center:[d.lon, d.lat], zoom:15}); return; }
   status('Finding route…');
   try {
     const j = await (await fetch(`https://router.project-osrm.org/route/v1/driving/${pos.lon},${pos.lat};${d.lon},${d.lat}?overview=full&geometries=geojson&steps=true`)).json();
     if (j.code !== 'Ok') throw new Error(j.message || j.code);
     route = j.routes[0];
-    coords = route.geometry.coordinates.map(([x, y]) => [y, x]);
+    coords = route.geometry.coordinates;
     steps = route.legs[0].steps; stepIdx = 1; announced = -1; offCount = 0;
-    routeLine.setLatLngs(coords).addTo(map);
-    if (!nav) { setFollow(false); map.fitBounds(routeLine.getBounds(), {paddingTopLeft:[20, 90], paddingBottomRight:[70, 230]}); }
+    map.getSource('route').setData(route.geometry);
+    let b = {s:90, n:-90, w:180, e:-180};
+    for (const [x, y] of coords) b = {s:Math.min(b.s, y), n:Math.max(b.n, y), w:Math.min(b.w, x), e:Math.max(b.e, x)};
+    route.bbox = b;
+    if (!nav) { setFollow(false); map.fitBounds([[b.w, b.s], [b.e, b.n]], {padding:{top:100, bottom:300, left:30, right:80}, bearing:0, pitch:0, duration:900}); }
     $('appleBtn').href = `https://maps.apple.com/?daddr=${d.lat},${d.lon}&dirflg=d`;
     $('wazeBtn').href = `https://waze.com/ul?ll=${d.lat},${d.lon}&navigate=yes`; // Waze has live police reports, and runs on CarPlay
     $('rTitle').textContent = d.title;
     $('card').hidden = false;
     updateCard();
     if (quiet) say('New route');
-    const b = routeLine.getBounds();
-    if (b.getNorthEast().distanceTo(b.getSouthWest()) < 150000) await load(b.pad(0.05)); // big trips load as you drive
+    if (dist({lat:b.s, lon:b.w}, {lat:b.n, lon:b.e}) < 150000) await load(pad(b, .05)); // big trips load as you drive
     else status('Long trip: cameras load as you drive');
   } catch (e) { status('Couldn\'t get a route: ' + e.message); }
 }
 function updateCard() {
   if (!route) return;
-  const counts = {};
-  for (const s of seen.values()) if (TYPES[s.type].alert && map.hasLayer(layers[s.type]) && distToLine(s, coords) < 40) counts[s.type] = (counts[s.type] || 0) + 1;
-  $('rMeta').textContent = `${Math.round(route.duration / 60)} min · ${fmt(route.distance)}`;
+  const b = route.bbox, m = .001, counts = {};
+  for (const s of seen.values()) {
+    if (!TYPES[s.type].alert || !enabled[s.type] || s.lat < b.s - m || s.lat > b.n + m || s.lon < b.w - m || s.lon > b.e + m) continue; // cheap box check first
+    if (distToLine(s, coords) < 40) counts[s.type] = (counts[s.type] || 0) + 1;
+  }
+  $('rMeta').textContent = `${Math.round(route.duration / 60)} MIN · ${fmt(route.distance).toUpperCase()}`;
   const chips = Object.entries(counts).map(([k, n]) => {
     const c = document.createElement('span'); c.className = 'chip';
-    c.innerHTML = `<span class="dot" style="background:${TYPES[k].color}"></span>`; c.append(`${n} ${TYPES[k].label}`);
+    c.innerHTML = `<span class="dot" style="background:${TYPES[k].color};box-shadow:0 0 8px ${TYPES[k].color}"></span>`; c.append(`${n} ${TYPES[k].label}`);
     return c;
   });
-  if (!chips.length) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = 'No known cameras on this route'; chips.push(c); }
+  if (!chips.length) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = 'No known cameras or police on this route'; chips.push(c); }
   $('rCams').replaceChildren(...chips);
 }
+const ARROWS = {left:'⬅', right:'➡', 'slight left':'⬉', 'slight right':'⬈', 'sharp left':'⬋', 'sharp right':'⬊', straight:'⬆', uturn:'↩'};
 function stepText(s) {
   const m = s.maneuver, name = s.name || s.ref || '', mod = (m.modifier || '').replace('uturn', 'around');
   if (m.type === 'depart') return `Head ${['north','northeast','east','southeast','south','southwest','west','northwest'][Math.round(m.bearing_after / 45) % 8]}${name ? ' on ' + name : ''}`;
@@ -354,42 +526,47 @@ document.addEventListener('visibilitychange', () => { if (nav && document.visibi
 $('goBtn').onclick = () => {
   if (!route) return;
   nav = true; setFollow(true); keepAwake();
-  $('goBtn').hidden = true; $('turn').hidden = false;
-  if (pos) map.setView([pos.lat, pos.lon], 16);
+  $('goBtn').hidden = true; $('turn').hidden = false; $('card').classList.add('driving');
+  if (shown) map.easeTo(camOpts(1200));
   say(stepText(steps[stepIdx] || steps[0]));
   navTick();
 };
 function endRoute() {
   nav = false; route = null; dest = null; coords = []; steps = [];
-  routeLine.remove(); destMarker?.remove(); destMarker = null;
+  map.getSource('route').setData({type:'FeatureCollection', features:[]});
+  destMarker?.remove(); destMarker = null;
   wake?.release?.(); wake = null;
-  $('card').hidden = true; $('turn').hidden = true; $('goBtn').hidden = false;
+  $('card').hidden = true; $('turn').hidden = true; $('goBtn').hidden = false; $('card').classList.remove('driving');
+  map.easeTo({pitch:0, bearing:0, duration:800});
 }
 $('endBtn').onclick = endRoute;
 function navTick() {
   if (!nav || !pos || !steps.length) return;
-  let st = steps[stepIdx], d = dist(pos, {lat:st.maneuver.location[1], lon:st.maneuver.location[0]});
-  if (d < 25 && stepIdx < steps.length - 1) { stepIdx++; st = steps[stepIdx]; d = dist(pos, {lat:st.maneuver.location[1], lon:st.maneuver.location[0]}); }
-  $('tDist').textContent = fmt(d); $('tText').textContent = stepText(st);
+  const at = s => ({lat:s.maneuver.location[1], lon:s.maneuver.location[0]});
+  let st = steps[stepIdx], d = dist(pos, at(st));
+  if (d < 25 && stepIdx < steps.length - 1) { stepIdx++; st = steps[stepIdx]; d = dist(pos, at(st)); }
+  $('tDist').textContent = fmt(d).toUpperCase(); $('tText').textContent = stepText(st);
+  $('tIcon').textContent = st.maneuver.type === 'arrive' ? '◎' : /roundabout|rotary/.test(st.maneuver.type) ? '⟳' : ARROWS[st.maneuver.modifier] || '⬆';
   if (st.maneuver.type === 'arrive' && d < 40) { say('You have arrived'); endRoute(); return; }
-  if (d < 300 && announced !== stepIdx) { announced = stepIdx; say(`In ${fmt(d).replace('ft', 'feet').replace('mi', 'miles')}, ${stepText(st)}`); }
+  if (d < 300 && announced !== stepIdx) { announced = stepIdx; say(`In ${spoken(d)}, ${stepText(st)}`); }
   offCount = distToLine(pos, coords) > 80 ? offCount + 1 : 0;
   if (offCount === 3) routeTo(dest, true);
 }
 
-// ---------- camera alerts ----------
+// ---------- camera + police alerts ----------
 const alerted = new Set(), alertEl = $('alert');
 let alertTimer;
 function checkAlerts() {
-  const warnM = +warnSel.value;
+  const warnM = +warnSel.value, box = warnM * 2 / 111000 * 1.5;
   let near = null;
   for (const [id, s] of seen) {
-    if (!TYPES[s.type].alert || !map.hasLayer(layers[s.type])) continue;
+    if (Math.abs(s.lat - pos.lat) > box || Math.abs(s.lon - pos.lon) > box * 2) { alerted.delete(id); continue; } // cheap reject before trig
+    if (!TYPES[s.type].alert || !enabled[s.type]) continue;
     const d = dist(pos, s);
     if (d > warnM * 2) { alerted.delete(id); continue; }
     if (d > warnM || alerted.has(id)) continue;
-    // only cameras in front of you (within 50° of travel direction); unknown heading = warn anyway
-    if (heading != null && d > 40 && Math.abs((bearing(pos, s) - heading + 540) % 360 - 180) > 50) continue;
+    // only things in front of you (within 50° of travel direction); unknown heading = warn anyway
+    if (heading != null && d > 40 && Math.abs(angleDiff(heading, bearing(pos, s))) > 50) continue;
     if (!near || d < near.d) near = {id, d, s};
   }
   if (!near) return;
@@ -397,24 +574,39 @@ function checkAlerts() {
   const t = TYPES[near.s.type];
   alertEl.textContent = `${t.say} ahead · ${fmt(near.d)}`;
   alertEl.style.background = t.color;
+  alertEl.style.boxShadow = `0 0 34px ${t.color}aa, 0 10px 30px #000b`;
+  alertEl.style.color = /avg|speed/.test(near.s.type) ? '#140800' : '#fff';
   alertEl.hidden = false;
   clearTimeout(alertTimer); alertTimer = setTimeout(() => alertEl.hidden = true, 7000);
-  say(`${t.say} ahead, ${fmt(near.d).replace('ft', 'feet').replace('mi', 'miles')}`);
+  say(`${t.say} ahead, ${spoken(near.d)}`);
 }
 
-navigator.geolocation?.watchPosition(p => {
-  pos = {lat:p.coords.latitude, lon:p.coords.longitude};
-  // GPS heading only exists while moving; otherwise derive it from the last 10+ m of travel
-  if (p.coords.heading != null && !isNaN(p.coords.heading) && p.coords.speed > 1) heading = p.coords.heading;
-  else if (last && dist(last, pos) > 10) heading = bearing(last, pos);
-  if (!last || dist(last, pos) > 10) last = pos;
-  if (!me) { me = L.marker([pos.lat, pos.lon], {icon:meIcon, zIndexOffset:1000, keyboard:false}).addTo(map); map.setView([pos.lat, pos.lon], 15); }
-  me.setLatLng([pos.lat, pos.lon]);
-  const svg = document.getElementById('meSvg');
-  if (svg) { svg.style.transform = `rotate(${heading ?? 0}deg)`; document.getElementById('meArrow').style.opacity = heading == null ? 0 : 1; }
-  if (follow) map.panTo([pos.lat, pos.lon], {animate:true});
-  checkAlerts();
-  navTick();
-}, e => status('Location: ' + e.message + '. Allow location for Safari in Settings.'), {enableHighAccuracy:true, maximumAge:1000});
+// ---------- boot ----------
+(async () => {
+  const style = await fetch('https://tiles.openfreemap.org/styles/liberty').then(r => r.json()).then(neonify)
+    .catch(() => ({version:8, sources:{}, layers:[{id:'bg', type:'background', paint:{'background-color':'#07031a'}}]}));
+  const v = store.get('view', [39.5, -98.35, 3]);
+  map = new maplibregl.Map({container:'map', style, center:[v[1], v[0]], zoom:v[2], maxPitch:65, attributionControl:false, fadeDuration:0});
+  map.addControl(new maplibregl.AttributionControl({compact:true}), 'top-right');
+  map.on('load', () => {
+    const empty = {type:'FeatureCollection', features:[]}, color = ['match', ['get', 't'], ...Object.entries(TYPES).flatMap(([k, t]) => [k, t.color]), '#fff'];
+    map.addSource('acc', {type:'geojson', data:empty});
+    map.addLayer({id:'acc-fill', type:'fill', source:'acc', paint:{'fill-color':'#00f0ff', 'fill-opacity':.08}});
+    map.addLayer({id:'acc-line', type:'line', source:'acc', paint:{'line-color':'#00f0ff', 'line-opacity':.45, 'line-width':1.2}});
+    map.addSource('route', {type:'geojson', data:empty});
+    map.addLayer({id:'route-glow', type:'line', source:'route', layout:{'line-cap':'round', 'line-join':'round'}, paint:{'line-color':'#00f0ff', 'line-width':18, 'line-blur':12, 'line-opacity':.55}});
+    map.addLayer({id:'route-line', type:'line', source:'route', layout:{'line-cap':'round', 'line-join':'round'}, paint:{'line-color':'#c8feff', 'line-width':5}});
+    map.addSource('spots', {type:'geojson', data:empty});
+    map.addLayer({id:'spots-glow', type:'circle', source:'spots', paint:{'circle-color':color, 'circle-radius':['interpolate', ['linear'], ['zoom'], 9, 6, 16, 18], 'circle-blur':1, 'circle-opacity':.75}});
+    map.addLayer({id:'spots', type:'circle', source:'spots', paint:{'circle-color':color, 'circle-radius':['interpolate', ['linear'], ['zoom'], 9, 2.5, 16, 7], 'circle-stroke-color':'#ffffff', 'circle-stroke-width':['interpolate', ['linear'], ['zoom'], 9, .5, 16, 1.8]}});
+    mapReady = true;
+    applyFilter(); refreshSpots();
+    map.on('click', 'spots-glow', e => showPopup(e.features[0].properties.id));
+    map.on('moveend', () => { const c = map.getCenter(); store.set('view', [c.lat, c.lng, map.getZoom()]); load(); });
+    for (const ev of ['dragstart', 'rotatestart', 'pitchstart']) map.on(ev, e => { if (e.originalEvent) setFollow(false); }); // only when you move the map yourself
+    load();
+    navigator.geolocation?.watchPosition(onFix, e => status('Location: ' + e.message + '. Allow location for Safari in Settings.'), {enableHighAccuracy:true, maximumAge:0});
+  });
+})();
 </script>
 </body></html>
