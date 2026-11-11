@@ -142,6 +142,7 @@ const TYPES = { // first match wins
   traffic:  {label:'Traffic cams',    color:'#b44bff', alert:false, on:false, say:'Traffic camera',     test:t => t.man_made === 'surveillance' && t.surveillance === 'traffic'},
   police:   {label:'Police stations', color:'#2b8cff', alert:true,  on:true,  say:'Police station',     test:t => t.amenity === 'police'},
   cop:      {label:'Cops I spotted',  color:'#00ff9c', alert:true,  on:true,  say:'Police spot',        test:() => false}, // only from the 🚓 button
+  lights:   {label:'Traffic lights',  color:'#7cff6b', alert:false, on:true,  say:'Traffic light',      test:t => t.highway === 'traffic_signals'}, // drives auto-zoom, no voice
 };
 const SERVERS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 const $ = id => document.getElementById(id);
@@ -250,7 +251,12 @@ function addSpot(id, type, lat, lon, info) {
   refreshSpots();
 }
 let saveTimer;
-const saveSpots = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => store.set('spots', [...seen].filter(([, s]) => s.type !== 'cop').slice(-40000).map(([id, s]) => [id, s.type, s.lat, s.lon, s.info])), 1500); };
+const saveSpots = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => {
+  const all = [...seen].filter(([, s]) => s.type !== 'cop'), cams = all.filter(([, s]) => s.type !== 'lights');
+  // cameras always fit in the phone's storage; traffic lights fill whatever room is left
+  const keep = cams.slice(-30000).concat(all.filter(([, s]) => s.type === 'lights').slice(-Math.max(0, 45000 - Math.min(cams.length, 30000))));
+  store.set('spots', keep.map(([id, s]) => [id, s.type, s.lat, s.lon, s.info]));
+}, 1500); };
 const saveCops = () => store.set('cops', [...seen].filter(([, s]) => s.type === 'cop').map(([id, s]) => [id, s.type, s.lat, s.lon, s.info]));
 for (const s of [...store.get('spots', []), ...store.get('cops', [])]) addSpot(...s); // saved on this phone, so they work when servers are down
 
@@ -279,7 +285,7 @@ async function load(bounds) {
     bounds = pad(viewBounds(), .5);
   }
   const bb = [bounds.s, bounds.w, bounds.n, bounds.e].map(x => x.toFixed(5)).join(',');
-  const q = `[out:json][timeout:25];(node["surveillance:type"="ALPR"](${bb});node["highway"="speed_camera"](${bb});rel["type"="enforcement"](${bb});node["man_made"="surveillance"]["surveillance"="traffic"](${bb});nwr["amenity"="police"](${bb}););out center tags;`;
+  const q = `[out:json][timeout:25];(node["surveillance:type"="ALPR"](${bb});node["highway"="speed_camera"](${bb});rel["type"="enforcement"](${bb});node["man_made"="surveillance"]["surveillance"="traffic"](${bb});nwr["amenity"="police"](${bb});node["highway"="traffic_signals"](${bb}););out center tags;`;
   inflight?.abort(); clearTimeout(retryTimer);
   const ctl = inflight = new AbortController();
   status('Loading cameras…');
@@ -344,8 +350,18 @@ function zoomFor(mph, turnM) {
 }
 console.assert(zoomFor(0, Infinity) > zoomFor(30, Infinity) && zoomFor(30, Infinity) > zoomFor(70, Infinity) && zoomFor(70, 50) > zoomFor(70, Infinity), 'zoomFor');
 let camZoom = null, nextTurnM = Infinity;
+function lightAheadM() { // nearest traffic light in front of you, within 300 m
+  if (!pos || heading == null || !enabled.lights) return Infinity;
+  let best = Infinity;
+  for (const s of seen.values()) {
+    if (s.type !== 'lights' || Math.abs(s.lat - pos.lat) > .003 || Math.abs(s.lon - pos.lon) > .004) continue;
+    const d = dist(pos, s);
+    if (d < best && d > 15 && Math.abs(angleDiff(heading, bearing(pos, s))) < 30) best = d;
+  }
+  return best;
+}
 function autoZoom() { // eased toward the target so the view breathes instead of jumping
-  const z = zoomFor((speed ?? 0) * 2.23694, nav ? nextTurnM : Infinity);
+  const z = zoomFor((speed ?? 0) * 2.23694, Math.min(nav ? nextTurnM : Infinity, lightAheadM()));
   return camZoom = camZoom == null ? z : camZoom + (z - camZoom) * .35;
 }
 function camOpts(duration) { // driving view: heading-up, tilted, you in the lower third
@@ -609,8 +625,11 @@ function checkAlerts() {
     map.addLayer({id:'route-glow', type:'line', source:'route', layout:{'line-cap':'round', 'line-join':'round'}, paint:{'line-color':'#00f0ff', 'line-width':18, 'line-blur':12, 'line-opacity':.55}});
     map.addLayer({id:'route-line', type:'line', source:'route', layout:{'line-cap':'round', 'line-join':'round'}, paint:{'line-color':'#c8feff', 'line-width':5}});
     map.addSource('spots', {type:'geojson', data:empty});
-    map.addLayer({id:'spots-glow', type:'circle', source:'spots', paint:{'circle-color':color, 'circle-radius':['interpolate', ['linear'], ['zoom'], 9, 6, 16, 18], 'circle-blur':1, 'circle-opacity':.75}});
-    map.addLayer({id:'spots', type:'circle', source:'spots', paint:{'circle-color':color, 'circle-radius':['interpolate', ['linear'], ['zoom'], 9, 2.5, 16, 7], 'circle-stroke-color':'#ffffff', 'circle-stroke-width':['interpolate', ['linear'], ['zoom'], 9, .5, 16, 1.8]}});
+    const isLight = ['==', ['get', 't'], 'lights'], fadeIn = ['interpolate', ['linear'], ['zoom'], 13, ['case', isLight, 0, 1], 14.5, 1]; // lights only when zoomed in
+    map.addLayer({id:'spots-glow', type:'circle', source:'spots', paint:{'circle-color':color, 'circle-radius':['interpolate', ['linear'], ['zoom'], 9, 6, 16, ['case', isLight, 10, 18]], 'circle-blur':1,
+      'circle-opacity':['interpolate', ['linear'], ['zoom'], 13, ['case', isLight, 0, .75], 14.5, ['case', isLight, .45, .75]]}});
+    map.addLayer({id:'spots', type:'circle', source:'spots', paint:{'circle-color':color, 'circle-radius':['interpolate', ['linear'], ['zoom'], 9, 2.5, 16, ['case', isLight, 4, 7]],
+      'circle-stroke-color':'#ffffff', 'circle-stroke-width':['interpolate', ['linear'], ['zoom'], 9, .5, 16, ['case', isLight, 1, 1.8]], 'circle-opacity':fadeIn, 'circle-stroke-opacity':fadeIn}});
     mapReady = true;
     applyFilter(); refreshSpots();
     map.on('click', 'spots-glow', e => showPopup(e.features[0].properties.id));
