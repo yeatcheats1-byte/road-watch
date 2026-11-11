@@ -60,7 +60,10 @@ button.primary{background:linear-gradient(135deg,#00f0ff,#7a5cff);border:0;color
 #rMeta{font:600 14px var(--hud);color:var(--cyan);margin-top:4px}
 #rCams{display:flex;flex-wrap:wrap;gap:6px}
 #card.driving{padding:10px 12px;gap:8px}
-#card.driving #rCams,#card.driving #rTitle{display:none}
+#card.driving #rCams,#card.driving #rTitle,#card.driving .seg{display:none}
+.seg{display:flex;gap:6px}
+.seg button{flex:1;min-height:42px;font-size:14px;font-weight:600;box-shadow:none;background:#ffffff08}
+.seg button[aria-pressed="true"]{border-color:var(--cyan);color:var(--cyan);background:#00f0ff14;box-shadow:0 0 14px #00f0ff40}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;background:#ffffff0d;border:1px solid #ffffff14;font-size:14px}
 #hudRow{display:flex;align-items:flex-end;justify-content:space-between;gap:8px}
 #status{font-size:12px;color:var(--dim);padding:6px 11px;border-radius:11px;background:var(--panel);max-width:60%}
@@ -120,6 +123,10 @@ button.primary{background:linear-gradient(135deg,#00f0ff,#7a5cff);border:0;color
   <div id="card" class="panel" hidden>
     <div><div id="rTitle"></div><div id="rMeta"></div></div>
     <div id="rCams"></div>
+    <div class="seg" role="group" aria-label="Route type">
+      <button id="mFast" aria-pressed="true">⚡ Fastest</button>
+      <button id="mBack" aria-pressed="false">🌲 Backroads · avoid police</button>
+    </div>
     <div class="row">
       <button id="goBtn" class="primary">Start</button>
       <a id="appleBtn" target="_blank" rel="noopener">Apple Maps</a>
@@ -494,23 +501,90 @@ async function search() {
   } catch (e) { if (e.name !== 'AbortError') { resultsEl.textContent = 'Search failed. Check your connection.'; resultsEl.hidden = false; } }
 }
 
-// ---------- routing (OSRM) ----------
-async function routeTo(d, quiet) {
+// ---------- routing ----------
+// Fastest: OSRM. Backroads: Valhalla with highways off, plus every known police/camera spot on the route blocked.
+let mode = store.get('mode', 'fast');
+const AVOID = new Set(['police', 'cop', 'alpr', 'speed', 'redlight', 'avg']);
+const showMode = () => { $('mFast').setAttribute('aria-pressed', mode === 'fast'); $('mBack').setAttribute('aria-pressed', mode === 'back'); };
+showMode();
+for (const [btn, m] of [['mFast', 'fast'], ['mBack', 'back']]) $(btn).onclick = () => { if (mode === m) return; mode = m; store.set('mode', m); showMode(); if (dest) routeTo(dest); };
+function bboxOf(line) {
+  let b = {s:90, n:-90, w:180, e:-180};
+  for (const [x, y] of line) b = {s:Math.min(b.s, y), n:Math.max(b.n, y), w:Math.min(b.w, x), e:Math.max(b.e, x)};
+  return b;
+}
+function spotsOn(line, types) { // known spots within 40 m of a route
+  const b = bboxOf(line), m = .001, out = [];
+  for (const [id, s] of seen) {
+    if (!types.has(s.type) || !enabled[s.type] || s.lat < b.s - m || s.lat > b.n + m || s.lon < b.w - m || s.lon > b.e + m) continue;
+    if (distToLine(s, line) < 40) out.push([id, s]);
+  }
+  return out;
+}
+function decode6(str) { // Valhalla's polyline, 6-digit precision -> [[lon,lat],...]
+  let i = 0, lat = 0, lon = 0;
+  const out = [];
+  while (i < str.length) {
+    for (const k of [0, 1]) {
+      let shift = 0, res = 0, b;
+      do { b = str.charCodeAt(i++) - 63; res |= (b & 31) << shift; shift += 5; } while (b >= 32);
+      const v = res & 1 ? ~(res >> 1) : res >> 1;
+      if (k) lon += v; else lat += v;
+    }
+    out.push([lon / 1e6, lat / 1e6]);
+  }
+  return out;
+}
+console.assert(Math.abs(decode6('_p~iF~ps|U')[0][0] + 12.02) < 1e-9 && Math.abs(decode6('_p~iF~ps|U')[0][1] - 3.85) < 1e-9, 'decode6');
+async function osrmRoute(from, d) {
+  const j = await (await fetch(`https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${d.lon},${d.lat}?overview=full&geometries=geojson&steps=true`)).json();
+  if (j.code !== 'Ok') throw new Error(j.message || j.code);
+  const r = j.routes[0];
+  return {duration:r.duration, distance:r.distance, coords:r.geometry.coordinates, steps:r.legs[0].steps};
+}
+const VMOD = {8:'straight', 9:'slight right', 10:'right', 11:'sharp right', 12:'uturn', 13:'uturn', 14:'sharp left', 15:'left', 16:'slight left',
+  17:'straight', 18:'slight right', 19:'slight left', 20:'slight right', 21:'slight left', 22:'straight', 23:'slight right', 24:'slight left'};
+async function valhallaRoute(from, d, exclude) {
+  const res = await fetch('https://valhalla1.openstreetmap.de/route', {method:'POST', body:JSON.stringify({
+    locations:[{lat:from.lat, lon:from.lon}, {lat:d.lat, lon:d.lon}], costing:'auto',
+    costing_options:{auto:{use_highways:0, use_tolls:0}}, exclude_locations:exclude, directions_options:{units:'miles'}})});
+  const j = await res.json();
+  if (!j.trip) throw new Error(j.error || 'no route');
+  const line = decode6(j.trip.legs[0].shape);
+  const steps = j.trip.legs[0].maneuvers.map(m => ({
+    maneuver:{location:line[m.begin_shape_index], type:[4, 5, 6].includes(m.type) ? 'arrive' : [1, 2, 3].includes(m.type) ? 'depart' : m.type === 26 ? 'roundabout' : 'turn', modifier:VMOD[m.type]},
+    text:m.instruction.replace(/\.$/, '')}));
+  return {duration:j.trip.summary.time, distance:j.trip.summary.length * 1609.34, coords:line, steps};
+}
+async function backroadsRoute(from, d) {
+  let best = await valhallaRoute(from, d, []), blocked = [];
+  for (let pass = 0; pass < 3; pass++) { // block what's on the route, ask again, until clean
+    const hits = spotsOn(best.coords, AVOID).filter(([id]) => !blocked.some(b => b.id === id));
+    if (!hits.length) break;
+    const next = blocked.concat(hits.map(([id, s]) => ({id, lat:s.lat, lon:s.lon}))).slice(0, 150);
+    try { best = await valhallaRoute(from, d, next.map(({lat, lon}) => ({lat, lon}))); blocked = next; }
+    catch { break; } // nothing gets around them all: keep the best so far
+  }
+  best.avoided = blocked.length;
+  return best;
+}
+async function routeTo(d, quiet, again) {
   dest = d;
   destMarker?.remove();
   destMarker = new maplibregl.Marker({color:'#ff2bd6'}).setLngLat([d.lon, d.lat]).addTo(map);
   if (!pos) { status('Turn on location to get directions'); map.easeTo({center:[d.lon, d.lat], zoom:15}); return; }
-  status('Finding route…');
+  status(mode === 'back' ? 'Finding a backroads route around police…' : 'Finding route…');
   try {
-    const j = await (await fetch(`https://router.project-osrm.org/route/v1/driving/${pos.lon},${pos.lat};${d.lon},${d.lat}?overview=full&geometries=geojson&steps=true`)).json();
-    if (j.code !== 'Ok') throw new Error(j.message || j.code);
-    route = j.routes[0];
-    coords = route.geometry.coordinates;
-    steps = route.legs[0].steps; stepIdx = 1; announced = -1; offCount = 0;
-    map.getSource('route').setData(route.geometry);
-    let b = {s:90, n:-90, w:180, e:-180};
-    for (const [x, y] of coords) b = {s:Math.min(b.s, y), n:Math.max(b.n, y), w:Math.min(b.w, x), e:Math.max(b.e, x)};
-    route.bbox = b;
+    let r;
+    if (mode === 'back') {
+      try { r = await backroadsRoute(pos, d); }
+      catch { r = await osrmRoute(pos, d); status('Backroads server busy · showing fastest route'); }
+    } else r = await osrmRoute(pos, d);
+    route = {duration:r.duration, distance:r.distance, avoided:r.avoided, bbox:bboxOf(r.coords)};
+    coords = r.coords;
+    steps = r.steps; stepIdx = 1; announced = -1; offCount = 0;
+    map.getSource('route').setData({type:'LineString', coordinates:coords});
+    const b = route.bbox;
     if (!nav) { setFollow(false); map.fitBounds([[b.w, b.s], [b.e, b.n]], {padding:{top:100, bottom:300, left:30, right:80}, bearing:0, pitch:0, duration:900}); }
     $('appleBtn').href = `https://maps.apple.com/?daddr=${d.lat},${d.lon}&dirflg=d`;
     $('wazeBtn').href = `https://waze.com/ul?ll=${d.lat},${d.lon}&navigate=yes`; // Waze has live police reports, and runs on CarPlay
@@ -518,8 +592,14 @@ async function routeTo(d, quiet) {
     $('card').hidden = false;
     updateCard();
     if (quiet) say('New route');
-    if (dist({lat:b.s, lon:b.w}, {lat:b.n, lon:b.e}) < 150000) await load(pad(b, .05)); // big trips load as you drive
-    else status('Long trip: cameras load as you drive');
+    const area = pad(b, .05);
+    if (dist({lat:b.s, lon:b.w}, {lat:b.n, lon:b.e}) >= 150000) status('Long trip: cameras load as you drive');
+    else if (!fetched || !contains(fetched, area)) {
+      await load(area);
+      // fresh camera data may show spots on the backroads route: plan once more around them
+      if (mode === 'back' && !again && route && spotsOn(coords, AVOID).length) return routeTo(d, quiet, true);
+    }
+    if (mode === 'back' && /Finding/.test(statusEl.textContent)) status(route.avoided ? `Backroads route · steered around ${route.avoided} spots` : 'Backroads route');
   } catch (e) { status('Couldn\'t get a route: ' + e.message); }
 }
 function updateCard() {
@@ -529,7 +609,7 @@ function updateCard() {
     if (!TYPES[s.type].alert || !enabled[s.type] || s.lat < b.s - m || s.lat > b.n + m || s.lon < b.w - m || s.lon > b.e + m) continue; // cheap box check first
     if (distToLine(s, coords) < 40) counts[s.type] = (counts[s.type] || 0) + 1;
   }
-  $('rMeta').textContent = `${Math.round(route.duration / 60)} MIN · ${fmt(route.distance).toUpperCase()}`;
+  $('rMeta').textContent = `${Math.round(route.duration / 60)} MIN · ${fmt(route.distance).toUpperCase()}${mode === 'back' ? ' · BACKROADS' + (route.avoided ? ` · ${route.avoided} AVOIDED` : '') : ''}`;
   const chips = Object.entries(counts).map(([k, n]) => {
     const c = document.createElement('span'); c.className = 'chip';
     c.innerHTML = `<span class="dot" style="background:${TYPES[k].color};box-shadow:0 0 8px ${TYPES[k].color}"></span>`; c.append(`${n} ${TYPES[k].label}`);
@@ -540,6 +620,7 @@ function updateCard() {
 }
 const ARROWS = {left:'⬅', right:'➡', 'slight left':'⬉', 'slight right':'⬈', 'sharp left':'⬋', 'sharp right':'⬊', straight:'⬆', uturn:'↩'};
 function stepText(s) {
+  if (s.text) return s.text; // Valhalla writes its own instructions
   const m = s.maneuver, name = s.name || s.ref || '', mod = (m.modifier || '').replace('uturn', 'around');
   if (m.type === 'depart') return `Head ${['north','northeast','east','southeast','south','southwest','west','northwest'][Math.round(m.bearing_after / 45) % 8]}${name ? ' on ' + name : ''}`;
   if (m.type === 'arrive') return 'Arrive at your destination';
